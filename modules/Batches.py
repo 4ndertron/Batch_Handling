@@ -133,7 +133,6 @@ class BatchHandler:
         self.workbook.close()
         if self.console_output:
             print('All files have been saved, and all connections have been closed.')
-            print('Now all you need to do is create a crawler to give the file to LD for you.')
 
     def run_batch_handler(self):
         self._set_credentials()
