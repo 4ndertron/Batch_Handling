@@ -25,6 +25,9 @@ class BatchHandler:
     transfer_accounts_sql_file = 'C:\\Users\\robert.anderson\\PycharmProjects\\' \
                                  'UrgentFeedback\\SQL\\Filings\\SepTransferCases.sql'
     dl_dir = r'S:\Folders\Filings\New batches to be filed - 2018'
+    # The S: drive in for the download directory is a result of downloading Citrix File's ShareFile Desktop App.
+    # Once the file is saved to that directory, it is automatically uploaded to the ShareFile cloud by the app, which
+    # removes the need to run a crawler through the ShareFile website.
 
     def __init__(self, console_output=False):
         self.console_output = console_output
