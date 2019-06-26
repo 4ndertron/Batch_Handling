@@ -140,8 +140,3 @@ class BatchHandler:
         self._create_workbook()
         self._calc_batch()
         self._populate_workbook()
-
-
-if __name__ == '__main__':
-    new_handle = BatchHandler()
-    new_handle.run_batch_handler()
