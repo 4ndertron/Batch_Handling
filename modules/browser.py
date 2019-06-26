@@ -40,7 +40,15 @@ class BrowserBase:
         },
         "ShareFile": {
             "Start_address": "https://leasedimensions.sharefile.com",
-            "Filings_css_selector": "xyz"
+            "Sign_in_css_selector": "#applicationHost > div > div > form > div.nav.text-center.no-back.has-remember-me"
+                                    " > button",
+            "Filings_css_selector": "#content > div:nth-child(1) > div.body_knoatw > div > div > div.listView_1h8hbd0"
+                                    " > table > tbody > tr:nth-child(4) > td.cell_nob1xv > div",
+            "Batch_Folder_css_selector": "#content > div:nth-child(1) > div.body_knoatw > div > div:nth-child(2) >"
+                                         " div.listView_1h8hbd0 > table > tbody > tr:nth-child(8) > td.cell_nob1xv"
+                                         " > div > div",
+            "Hover_add_button_css_selector": "#id0\.4282407335567353 > div > span",
+            "Upload_after_hover_css_selector": ""
         },
         "Uberconference": {
             "Start_address": "https://uberconference.com/tyleranderson1",
