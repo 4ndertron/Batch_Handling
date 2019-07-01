@@ -1,3 +1,4 @@
+#! python
 from modules.Batches import BatchHandler
 
 batches = BatchHandler(console_output=True)
