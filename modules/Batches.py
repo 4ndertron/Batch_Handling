@@ -1,8 +1,10 @@
 import snowflake.connector
 import os
+import re
 import json
 import openpyxl as xl
 import datetime as dt
+import pandas as pd
 
 
 class BatchHandler:
@@ -20,11 +22,12 @@ class BatchHandler:
             5) DATABASE
         Please see Snowflake documentation for the definitions of the required fields.
     """
-    new_account_sql_file = 'C:\\Users\\robert.anderson\\PycharmProjects\\' \
-                           'UrgentFeedback\\SQL\\Filings\\FilingsNewAccounts.sql'
-    transfer_accounts_sql_file = 'C:\\Users\\robert.anderson\\PycharmProjects\\' \
-                                 'UrgentFeedback\\SQL\\Filings\\SepTransferCases.sql'
+    all_batch_sql_file = 'C:\\Users\\robert.anderson\\PycharmProjects\\UrgentFeedback\\SQL\\' \
+                         'Filings\\Warehouse Views\\V_FILINGS_BATCH_ACCOUNT_LIST.sql'
     dl_dir = r'S:\Folders\Filings\New batches to be filed - 2018'
+
+    # dl_dir = r'C:\users\robert.anderson\downloads'
+
     # The S: drive in for the download directory is a result of downloading Citrix File's ShareFile Desktop App.
     # Once the file is saved to that directory, it is automatically uploaded to the ShareFile cloud by the app, which
     # removes the need to run a crawler through the ShareFile website.
@@ -39,9 +42,13 @@ class BatchHandler:
         self.account = ''
         self.warehouse = ''
         self.database = ''
-        self.new_account_sql = ''
-        self.transfer_accounts_sql = ''
+        self.all_batch_sql = ''
+        self.batch_types = ['New Account', 'Transfer Account']
         self.batch_number = 0
+        self.date_auto = dt.date.today().strftime('%m.%d.%Y')
+        self.date_manual = '09.25.2019'
+        self.con = None
+        self.cur = None
 
     def _set_credentials(self):
         if self.console_output:
@@ -58,11 +65,8 @@ class BatchHandler:
     def _collect_queries(self):
         if self.console_output:
             print('Reading the queries...')
-        open_sql = open(self.new_account_sql_file, 'r')
-        self.new_account_sql = open_sql.read()
-        open_sql.close()
-        open_sql = open(self.transfer_accounts_sql_file, 'r')
-        self.transfer_accounts_sql = open_sql.read()
+        open_sql = open(self.all_batch_sql_file, 'r')
+        self.all_batch_sql = open_sql.read()
         open_sql.close()
         if self.console_output:
             print('I know what to ask Snowflake.')
@@ -79,6 +83,7 @@ class BatchHandler:
         end_date = dt.date.today()
         diff = end_date - start_date
         diff_weeks = diff.days / 7
+        # self.batch_number = int(307)
         self.batch_number = int(diff_weeks)
         if self.console_output:
             print('I know how many times this file has been created.')
@@ -97,7 +102,7 @@ class BatchHandler:
     def _populate_workbook(self):
         if self.console_output:
             print('Knocking on Snowflake\'s door...')
-        con = snowflake.connector.connect(
+        self.con = snowflake.connector.connect(
             user=self.user,
             password=self.password,
             account=self.account,
@@ -106,33 +111,67 @@ class BatchHandler:
         )
         if self.console_output:
             print('Asking Snowflake your question...')
-        cur = con.cursor().execute(self.new_account_sql)
-        col_names = [x[0] for x in cur.description]
+        self.cur = self.con.cursor().execute(self.all_batch_sql)
+        col_names = [x[0] for x in self.cur.description]
         if self.console_output:
             print('Collecting results...')
-        results = cur.fetchall()
+        results = self.cur.fetchall()
         if self.console_output:
             print('Writing results to the temporary workspace...')
         self.sheet_1.append(col_names)
-        for result in results:
-            if result[len(result) - 1] == self.batch_number:
-                self.sheet_1.append(result)
-        cur = con.cursor().execute(self.transfer_accounts_sql)
-        results = cur.fetchall()
-        col_names = [x[0] for x in cur.description]
         self.sheet_2.append(col_names)
         for result in results:
-            self.sheet_2.append(result)
-        cur.close()
-        con.close()
+            if result[len(result) - 2] == self.batch_number:
+                if result[len(result)-1] == self.batch_types[0]:
+                    self.sheet_1.append(result)
+                elif result[len(result)-1] == self.batch_types[1]:
+                    self.sheet_2.append(result)
+        # cur.close()
+        # con.close()
         if self.console_output:
             print('Saving the workspace to your downloads directory...')
         self.workbook.save(os.path.join(self.dl_dir, 'Batch {} {}.xlsx'.format(str(self.batch_number),
-                                                                               dt.date.today().strftime(
-                                                                                   '%m.%d.%Y'))))
+                                                                               self.date_auto)))
         self.workbook.close()
         if self.console_output:
             print('All files have been saved, and all connections have been closed.')
+
+    def _stage_workbook(self):
+        new_account_file_path = os.path.join(os.environ['userprofile'], 'downloads', 'new_account_upload_stage.csv')
+        transfer_account_file_path = os.path.join(os.environ['userprofile'], 'downloads',
+                                                  'transfer_account_upload_stage.csv')
+        new_csv = pd.read_excel(
+            os.path.join(self.dl_dir, 'Batch {} {}.xlsx'.format(str(self.batch_number), self.date_auto)),
+            'New Accounts', index_col=None)
+        transfer_csv = pd.read_excel(
+            os.path.join(self.dl_dir, 'Batch {} {}.xlsx'.format(str(self.batch_number), self.date_auto)),
+            'Transfer Accounts', index_col=None)
+        new_csv.to_csv(new_account_file_path)
+        transfer_csv.to_csv(transfer_account_file_path)
+        # con = snowflake.connector.connect(
+        #     user=self.user,
+        #     password=self.password,
+        #     account=self.account,
+        #     warehouse=self.warehouse,
+        #     database=self.database
+        # )
+        # if self.console_output:
+        #     print('Asking Snowflake your question...')
+        # cur = con.cursor()
+        self.cur.execute("put file://? @%MY_UPLOADER_STAGE auto_compress=TRUE", new_account_file_path)
+        self.cur.execute("put file://? @%MY_UPLOADER_STAGE auto_compress=TRUE", transfer_account_file_path)
+
+    def _append_stage(self):
+        transfer_upload_query_path = 'C:\\Users\\robert.anderson\\PycharmProjects\\UrgentFeedback\\SQL\\Filings' \
+                                     '\\Transfer_Stage_Upload.sql'
+        new_upload_query_path = 'C:\\Users\\robert.anderson\\PycharmProjects\\UrgentFeedback\\SQL\\Filings' \
+                                '\\New_Stage_Upload.sql'
+        transfer_query = open(transfer_upload_query_path, 'r')
+        self.cur.execute(transfer_query.read())
+        transfer_query.close()
+        new_query = open(new_upload_query_path, 'r')
+        self.cur.execute(new_query.read())
+        new_query.close()
 
     def run_batch_handler(self):
         self._set_credentials()
@@ -140,3 +179,38 @@ class BatchHandler:
         self._create_workbook()
         self._calc_batch()
         self._populate_workbook()
+        # self._stage_workbook()
+        # self._append_stage()
+
+    def search_for_accounts(self, lst):
+        """
+        Pass a list of account numbers, as 7 digits, to have a dictionary returned of matching files in the default
+        directory.
+        :param lst: list of 7 digit accounts .
+        :return: dictionary of accounts found in a file.
+        """
+        batch_regex = re.compile(r'Batch \d{3}', re.I)
+        acct_regex = re.compile(r'\d{7}')
+        acct_list = {}
+        for file in os.listdir(self.dl_dir):
+            if self.console_output:
+                print('checking {}'.format(file))
+            mo = batch_regex.search(file)
+            if mo:
+                if self.console_output:
+                    print('opening {}'.format(file))
+                f = xl.load_workbook(os.path.join(self.dl_dir, file))
+                fs = f.active
+                if self.console_output:
+                    print('iterating through the first two columns...')
+                for row in fs.iter_cols(min_col=1, max_col=2, min_row=2, max_row=fs.max_row):
+                    rmo = acct_regex.search(str(row))
+                    if rmo:
+                        if int(rmo.string) in lst:
+                            acct_list[rmo.string] = file
+            else:
+                if self.console_output:
+                    print('{} did not match the batch regex'.format(file))
+        if self.console_output:
+            print('returning the dictionary and ending the function call.')
+        return acct_list
