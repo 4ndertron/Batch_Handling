@@ -22,11 +22,12 @@ class BatchHandler:
             5) DATABASE
         Please see Snowflake documentation for the definitions of the required fields.
     """
-    all_batch_sql_file = 'C:\\Users\\robert.anderson\\PycharmProjects\\UrgentFeedback\\SQL\\' \
-                         'Filings\\Warehouse Views\\V_FILINGS_BATCH_ACCOUNT_LIST.sql'
+    all_batch_sql_file = './queries/account_list.sql'
     dl_dir = r'S:\Folders\Filings\New batches to be filed - 2018'
 
     # dl_dir = r'C:\users\robert.anderson\downloads'
+
+    # '<img style="max-height:150px;max-width:150px;height:auto;width:auto;" src="https://46nsgon4l7.execute-api.us-west-2.amazonaws.com/prod/tms/workday-photo/'||BADGE_ID||'">'
 
     # The S: drive in for the download directory is a result of downloading Citrix File's ShareFile Desktop App.
     # Once the file is saved to that directory, it is automatically uploaded to the ShareFile cloud by the app, which
@@ -35,15 +36,18 @@ class BatchHandler:
     def __init__(self, console_output=False):
         self.console_output = console_output
         self.workbook = None
-        self.sheet_1 = None
-        self.sheet_2 = None
+        self.sheets = []
+        # todo: convert these hard-coded attributes into a dictionary object.
         self.user = ''
         self.password = ''
         self.account = ''
         self.warehouse = ''
         self.database = ''
+        # End hard-coded attributes
+        # todo: make a file that contains the distinct batch types from the query,
+        #   instead of hard-coding the values here.
+        self.batch_types = ['New Account', 'Transfer Account', 'Refinance Account']
         self.all_batch_sql = ''
-        self.batch_types = ['New Account', 'Transfer Account']
         self.batch_number = 0
         self.date_auto = dt.date.today().strftime('%m.%d.%Y')
         self.date_manual = '09.25.2019'
@@ -96,8 +100,8 @@ class BatchHandler:
         if self.console_output:
             print('Making a temporary workspace in memory')
         self.workbook = xl.Workbook('temp_batch.xlsx')
-        self.sheet_1 = self.workbook.create_sheet('New Accounts', 0)
-        self.sheet_2 = self.workbook.create_sheet('Transfer Accounts', 1)
+        for i in range(len(self.batch_types)):
+            self.sheets.append(self.workbook.create_sheet(self.batch_types[i], i))
 
     def _populate_workbook(self):
         if self.console_output:
@@ -118,16 +122,11 @@ class BatchHandler:
         results = self.cur.fetchall()
         if self.console_output:
             print('Writing results to the temporary workspace...')
-        self.sheet_1.append(col_names)
-        self.sheet_2.append(col_names)
+        for sheet in self.sheets:
+            sheet.append(col_names)
         for result in results:
             if result[len(result) - 2] == self.batch_number:
-                if result[len(result)-1] == self.batch_types[0]:
-                    self.sheet_1.append(result)
-                elif result[len(result)-1] == self.batch_types[1]:
-                    self.sheet_2.append(result)
-        # cur.close()
-        # con.close()
+                self.sheets[self.batch_types.index(result[len(result)-1])].append(result)
         if self.console_output:
             print('Saving the workspace to your downloads directory...')
         self.workbook.save(os.path.join(self.dl_dir, 'Batch {} {}.xlsx'.format(str(self.batch_number),
@@ -136,61 +135,22 @@ class BatchHandler:
         if self.console_output:
             print('All files have been saved, and all connections have been closed.')
 
-    def _stage_workbook(self):
-        new_account_file_path = os.path.join(os.environ['userprofile'], 'downloads', 'new_account_upload_stage.csv')
-        transfer_account_file_path = os.path.join(os.environ['userprofile'], 'downloads',
-                                                  'transfer_account_upload_stage.csv')
-        new_csv = pd.read_excel(
-            os.path.join(self.dl_dir, 'Batch {} {}.xlsx'.format(str(self.batch_number), self.date_auto)),
-            'New Accounts', index_col=None)
-        transfer_csv = pd.read_excel(
-            os.path.join(self.dl_dir, 'Batch {} {}.xlsx'.format(str(self.batch_number), self.date_auto)),
-            'Transfer Accounts', index_col=None)
-        new_csv.to_csv(new_account_file_path)
-        transfer_csv.to_csv(transfer_account_file_path)
-        # con = snowflake.connector.connect(
-        #     user=self.user,
-        #     password=self.password,
-        #     account=self.account,
-        #     warehouse=self.warehouse,
-        #     database=self.database
-        # )
-        # if self.console_output:
-        #     print('Asking Snowflake your question...')
-        # cur = con.cursor()
-        self.cur.execute("put file://? @%MY_UPLOADER_STAGE auto_compress=TRUE", new_account_file_path)
-        self.cur.execute("put file://? @%MY_UPLOADER_STAGE auto_compress=TRUE", transfer_account_file_path)
-
-    def _append_stage(self):
-        transfer_upload_query_path = 'C:\\Users\\robert.anderson\\PycharmProjects\\UrgentFeedback\\SQL\\Filings' \
-                                     '\\Transfer_Stage_Upload.sql'
-        new_upload_query_path = 'C:\\Users\\robert.anderson\\PycharmProjects\\UrgentFeedback\\SQL\\Filings' \
-                                '\\New_Stage_Upload.sql'
-        transfer_query = open(transfer_upload_query_path, 'r')
-        self.cur.execute(transfer_query.read())
-        transfer_query.close()
-        new_query = open(new_upload_query_path, 'r')
-        self.cur.execute(new_query.read())
-        new_query.close()
-
     def run_batch_handler(self):
         self._set_credentials()
         self._collect_queries()
         self._create_workbook()
         self._calc_batch()
         self._populate_workbook()
-        # self._stage_workbook()
-        # self._append_stage()
 
     def search_for_accounts(self, lst):
         """
-        Pass a list of account numbers, as 7 digits, to have a dictionary returned of matching files in the default
-        directory.
-        :param lst: list of 7 digit accounts .
+        Pass a list of account numbers, as 6 or more digits, to have a dictionary returned of matching
+        files in the default directory.
+        :param lst: list of 6 or more digit accounts .
         :return: dictionary of accounts found in a file.
         """
         batch_regex = re.compile(r'Batch \d{3}', re.I)
-        acct_regex = re.compile(r'\d{7}')
+        acct_regex = re.compile(r'\d{6,}')
         acct_list = {}
         for file in os.listdir(self.dl_dir):
             if self.console_output:
