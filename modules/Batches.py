@@ -22,7 +22,11 @@ class BatchHandler:
             5) DATABASE
         Please see Snowflake documentation for the definitions of the required fields.
     """
-    all_batch_sql_file = './queries/account_list.sql'
+    all_batch_sql_file = os.path.join(os.environ['userprofile'],
+                                      'PycharmProjects',
+                                      'Batch Handling',
+                                      'queries',
+                                      'account_list.sql')
     dl_dir = r'S:\Folders\Filings\New batches to be filed - 2018'
 
     # dl_dir = r'C:\users\robert.anderson\downloads'
@@ -126,7 +130,7 @@ class BatchHandler:
             sheet.append(col_names)
         for result in results:
             if result[len(result) - 2] == self.batch_number:
-                self.sheets[self.batch_types.index(result[len(result)-1])].append(result)
+                self.sheets[self.batch_types.index(result[len(result) - 1])].append(result)
         if self.console_output:
             print('Saving the workspace to your downloads directory...')
         self.workbook.save(os.path.join(self.dl_dir, 'Batch {} {}.xlsx'.format(str(self.batch_number),
