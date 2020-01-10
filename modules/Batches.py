@@ -31,8 +31,6 @@ class BatchHandler:
 
     # dl_dir = r'C:\users\robert.anderson\downloads'
 
-    # '<img style="max-height:150px;max-width:150px;height:auto;width:auto;" src="https://46nsgon4l7.execute-api.us-west-2.amazonaws.com/prod/tms/workday-photo/'||BADGE_ID||'">'
-
     # The S: drive in for the download directory is a result of downloading Citrix File's ShareFile Desktop App.
     # Once the file is saved to that directory, it is automatically uploaded to the ShareFile cloud by the app, which
     # removes the need to run a crawler through the ShareFile website.
