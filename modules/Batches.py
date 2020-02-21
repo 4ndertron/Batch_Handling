@@ -27,9 +27,9 @@ class BatchHandler:
                                       'Batch Handling',
                                       'queries',
                                       'account_list.sql')
-    dl_dir = r'S:\Folders\Filings\New batches to be filed - 2018'
+    # dl_dir = r'S:\Folders\Filings\New batches to be filed - 2018'
 
-    # dl_dir = r'C:\users\robert.anderson\downloads'
+    dl_dir = r'C:\users\robert.anderson\downloads'
 
     # The S: drive in for the download directory is a result of downloading Citrix File's ShareFile Desktop App.
     # Once the file is saved to that directory, it is automatically uploaded to the ShareFile cloud by the app, which
@@ -51,7 +51,8 @@ class BatchHandler:
         self.batch_types = ['New Account', 'Transfer Account', 'Refinance Account']
         self.all_batch_sql = ''
         self.batch_number = 0
-        self.date_auto = dt.date.today().strftime('%m.%d.%Y')
+        self.date_auto = dt.date.today()
+        # self.date_auto = dt.date(2020, 2, 19)
         self.date_manual = '09.25.2019'
         self.con = None
         self.cur = None
@@ -86,10 +87,10 @@ class BatchHandler:
         if self.console_output:
             print('Finding how many times this file has been created...')
         start_date = dt.date(2013, 11, 2)
-        end_date = dt.date.today()
+        end_date = self.date_auto
         diff = end_date - start_date
         diff_weeks = diff.days / 7
-        # self.batch_number = int(307)
+        # self.batch_number = int(328)
         self.batch_number = int(diff_weeks)
         if self.console_output:
             print('I know how many times this file has been created.')
@@ -132,7 +133,7 @@ class BatchHandler:
         if self.console_output:
             print('Saving the workspace to your downloads directory...')
         self.workbook.save(os.path.join(self.dl_dir, 'Batch {} {}.xlsx'.format(str(self.batch_number),
-                                                                               self.date_auto)))
+                                                                               self.date_auto.strftime('%m.%d.%Y'))))
         self.workbook.close()
         if self.console_output:
             print('All files have been saved, and all connections have been closed.')
