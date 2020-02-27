@@ -11,7 +11,8 @@ CREATE OR REPLACE TABLE D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS
     DATE_BATCH_RECEIVED_FROM_VSLR DATE COMMENT 'Date that the account was added to ShareFile',
     AR_NUMBER                     VARCHAR COMMENT 'Supposed to be the Service Name used in the T_SERVICE table.',
     PROJECT                       VARCHAR COMMENT 'Supposed to be the Service Name used in the T_SERVICE table.',
-    FEE                           FLOAT COMMENT 'Charge from LD to VSLR'
+    FEE                           FLOAT COMMENT 'Charge from LD to VSLR',
+    FILE_NAME                     VARCHAR COMMENT 'Custom column that\'s populated when the files are uploaded to the table.'
 ) COMMENT = 'Table containing invoice details, provided by LD, for processing filing requests to the local Counties.';
 
 DESCRIBE TABLE D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS;
