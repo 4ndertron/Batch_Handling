@@ -28,7 +28,6 @@ class BatchHandler:
                                       'queries',
                                       'account_list.sql')
     dl_dir = r'S:\Folders\Filings\New batches to be filed - 2018'
-
     # dl_dir = r'C:\users\robert.anderson\downloads'
 
     # The S: drive in for the download directory is a result of downloading Citrix File's ShareFile Desktop App.
