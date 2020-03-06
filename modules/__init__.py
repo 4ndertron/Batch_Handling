@@ -15,7 +15,7 @@ class Messages(Enum):
 
 class Validation(Enum):
     _batch_key = 'Batch'
-    _continuations_key = 'Continuations'
+    _continuations_key = 'Continuation'
     batch_save_location_local = 'Local'
     batch_save_location_sharefile = 'Sarefile'
     batch_primary_table = 'T_FILING_BATCH_UPLOAD_FILES'
