@@ -1,7 +1,9 @@
+from . import os
+from . import re
+from . import json
+from . import Validation
+from . import project_dir
 import snowflake.connector
-import os
-import re
-import json
 import openpyxl as xl
 import datetime as dt
 import pandas as pd
@@ -15,56 +17,36 @@ class BatchHandler:
 
     Prerequisites:
         1) You need to create a JSON formatted Environment Variable, named "SNOWFLAKE_KEY", with the following keys.
-            1) USERNAME
+            1) USER
             2) PASSWORD
             3) ACCOUNT
             4) WAREHOUSE
             5) DATABASE
         Please see Snowflake documentation for the definitions of the required fields.
     """
-    all_batch_sql_file = os.path.join(os.environ['userprofile'],
-                                      'PycharmProjects',
-                                      'Batch Handling',
+    all_batch_sql_file = os.path.join(project_dir,
                                       'queries',
                                       'account_list.sql')
-    dl_dir = r'S:\Folders\Filings\New batches to be filed - 2018'
-    # dl_dir = r'C:\users\robert.anderson\downloads'
 
-    # The S: drive in for the download directory is a result of downloading Citrix File's ShareFile Desktop App.
-    # Once the file is saved to that directory, it is automatically uploaded to the ShareFile cloud by the app, which
-    # removes the need to run a crawler through the ShareFile website.
-
-    def __init__(self, console_output=False):
+    def __init__(self, batch_end_date, save_location, console_output=False):
         self.console_output = console_output
-        self.workbook = None
+        self.workbooks = {}
         self.sheets = []
-        # todo: convert these hard-coded attributes into a dictionary object.
-        self.user = ''
-        self.password = ''
-        self.account = ''
-        self.warehouse = ''
-        self.database = ''
-        # End hard-coded attributes
-        # todo: make a file that contains the distinct batch types from the query,
-        #   instead of hard-coding the values here.
-        self.batch_types = ['New Account', 'Transfer Account', 'Refinance Account']
+        self.snowflake_credentials = {}
         self.all_batch_sql = ''
         self.batch_number = 0
-        self.date_auto = dt.date.today()
-        # self.date_auto = dt.date(2020, 2, 19)
-        self.date_manual = '09.25.2019'
+        self.save_location = save_location
+        self.batch_end_date = batch_end_date
         self.con = None
         self.cur = None
+        self.file_structure = Validation.weekly_batch_structure.value
 
     def _set_credentials(self):
         if self.console_output:
             print('Collecting Snowflake credentials form system environment...')
         snowflake_json = json.loads(os.environ['SNOWFLAKE_KEY'])
-        self.user = snowflake_json['USERNAME']
-        self.password = snowflake_json['PASSWORD']
-        self.account = snowflake_json['ACCOUNT']
-        self.warehouse = snowflake_json['WAREHOUSE']
-        self.database = snowflake_json['DATABASE']
+        for k, v in snowflake_json.items():
+            self.snowflake_credentials[k.lower()] = v
         if self.console_output:
             print('credentials have been collected and assigned')
 
@@ -84,63 +66,70 @@ class BatchHandler:
         :return: assigns self.batch_number the calculated batch number.
         """
         if self.console_output:
-            print('Finding how many times this file has been created...')
+            print('Finding the batch number based on the batch date value passed during object creation...')
         start_date = dt.date(2013, 11, 2)
-        end_date = self.date_auto
-        diff = end_date - start_date
+        diff = self.batch_end_date - start_date
         diff_weeks = diff.days / 7
-        # self.batch_number = int(328)
         self.batch_number = int(diff_weeks)
         if self.console_output:
-            print('I know how many times this file has been created.')
+            print(f'Batch {self.batch_number} is being evaluated.')
 
-    def _create_workbook(self):
-        """
-        This function is designed to save memory space until it is needed to generate the actual workbook.
-        :return:
-        """
+    def _generate_workbooks(self):
         if self.console_output:
             print('Making a temporary workspace in memory')
-        self.workbook = xl.Workbook('temp_batch.xlsx')
-        for i in range(len(self.batch_types)):
-            self.sheets.append(self.workbook.create_sheet(self.batch_types[i], i))
+        for file in self.file_structure:
+            self.workbooks[file] = {}
+            self.workbooks[file][Validation.workbook_key.value] = xl.Workbook(file + '.xlsx')
+            self.workbooks[file][Validation.worksheet_key.value] = []
+            for i in range(len(self.file_structure[file])):
+                self.workbooks[file][Validation.worksheet_key.value].append(
+                    self.workbooks[file][Validation.workbook_key.value].create_sheet(self.file_structure[file][i], i))
 
     def _populate_workbook(self):
         if self.console_output:
             print('Knocking on Snowflake\'s door...')
-        self.con = snowflake.connector.connect(
-            user=self.user,
-            password=self.password,
-            account=self.account,
-            warehouse=self.warehouse,
-            database=self.database
+        self.con = snowflake.connector.connect(  # Create the snowflake connection in the class instance variable
+            **self.snowflake_credentials  # Use the credentials found in the environment variable
         )
         if self.console_output:
             print('Asking Snowflake your question...')
-        self.cur = self.con.cursor().execute(self.all_batch_sql)
-        col_names = [x[0] for x in self.cur.description]
+        self.cur = self.con.cursor().execute(self.all_batch_sql)  # Retrieve the query results
+        col_names = [x[0] for x in self.cur.description]  # Generate a list of column names
         if self.console_output:
             print('Collecting results...')
-        results = self.cur.fetchall()
+        results = self.cur.fetchall()  # Assign all the query records to a method variable
         if self.console_output:
             print('Writing results to the temporary workspace...')
-        for sheet in self.sheets:
-            sheet.append(col_names)
-        for result in results:
-            if result[len(result) - 2] == self.batch_number:
-                self.sheets[self.batch_types.index(result[len(result) - 1])].append(result)
+        for wb in self.workbooks:
+            for ws in self.workbooks[wb][Validation.worksheet_key.value]:
+                ws.append(col_names)
+        # for sheet in self.sheets:
+        #     sheet.append(col_names)
+        for result in results:  # Iterate through the results
+            batch_index = len(result) - 2  # Get the index integer of the batch number column
+            result_batch = result[batch_index]  # Get the batch value of the specific result
+            if result_batch == self.batch_number:
+                type_index = len(result) - 1  # Get the index integer of the batch type column
+                result_type = result[type_index]  # Get the batch type value of the specific result
+                for wb in self.workbooks:  # Iterate through the workbooks
+                    if result_type in self.workbooks[wb][Validation.workbook_key.value].sheetnames:
+                        self.workbooks[wb][Validation.worksheet_key.value][
+                            self.workbooks[wb][Validation.workbook_key.value].sheetnames.index(result_type)].append(
+                            result)  # Append the record to the sheet
         if self.console_output:
-            print('Saving the workspace to your downloads directory...')
-        self.workbook.save(os.path.join(self.dl_dir, 'Batch {} {}.xlsx'.format(str(self.batch_number),
-                                                                               self.date_auto.strftime('%m.%d.%Y'))))
-        self.workbook.close()
+            print('Saving the workspaces to your designated location...')
+        for wb in self.workbooks:
+            dl_dir = Validation.dl_dir_match.value[self.save_location][wb]
+            file_name = wb + f' {self.batch_number} {self.batch_end_date.strftime("%m.%d.%Y")}.xlsx'
+            self.workbooks[wb][Validation.workbook_key.value].save(os.path.join(dl_dir, file_name))
+            self.workbooks[wb][Validation.workbook_key.value].close()
         if self.console_output:
             print('All files have been saved, and all connections have been closed.')
 
     def run_batch_handler(self):
         self._set_credentials()
         self._collect_queries()
-        self._create_workbook()
+        self._generate_workbooks()
         self._calc_batch()
         self._populate_workbook()
 
@@ -148,20 +137,21 @@ class BatchHandler:
         """
         Pass a list of account numbers, as 6 or more digits, to have a dictionary returned of matching
         files in the default directory.
+        NOTE: This method be obsolete since the batch files have been added to the data warehouse
         :param lst: list of 6 or more digit accounts .
         :return: dictionary of accounts found in a file.
         """
         batch_regex = re.compile(r'Batch \d{3}', re.I)
         acct_regex = re.compile(r'\d{6,}')
         acct_list = {}
-        for file in os.listdir(self.dl_dir):
+        for file in os.listdir(self.file_save_dir):
             if self.console_output:
                 print('checking {}'.format(file))
             mo = batch_regex.search(file)
             if mo:
                 if self.console_output:
                     print('opening {}'.format(file))
-                f = xl.load_workbook(os.path.join(self.dl_dir, file))
+                f = xl.load_workbook(os.path.join(self.file_save_dir, file))
                 fs = f.active
                 if self.console_output:
                     print('iterating through the first two columns...')
