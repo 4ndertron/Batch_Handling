@@ -1,6 +1,7 @@
 import os
 from modules.converting_to_csv import Converter
 from modules import Validation
+from modules import Messages
 
 
 def update_invoice_details(*args):
@@ -77,7 +78,8 @@ def main(function_list, args_list):
             print(f'Debug fun: {function_list[i].__name__}\nDebug args: {args_list[i]}')
             function_list[i](*args_list[i])
     else:
-        return Validation.main_error.value
+        if __name__ == '__main__':
+            return Messages.main_error.value
 
 
 if __name__ == '__main__':

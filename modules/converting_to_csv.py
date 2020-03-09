@@ -21,7 +21,6 @@ class Converter:
     def _add_f_to_df(self, full_file):
         file_basename = os.path.basename(full_file)
         file_name = file_basename[:-5]  # remove the ".xlsx" from the end of the file name
-        file_dir = os.path.dirname(full_file)
         if os.path.exists(full_file):  # If the file is in the directory
             file_pages = pd.ExcelFile(full_file).sheet_names
             # If the file being evaluated is an old invoice
@@ -35,7 +34,8 @@ class Converter:
                             file_pages.remove(file_pages[i])
                             ct -= 1
                         else:
-                            print(f'{file_pages[i]} is a wanted page.')
+                            if self.debug_text:
+                                print(f'{file_pages[i]} is a wanted page.')
                             ct -= 1
             file_dfs = pd.read_excel(full_file, file_pages)  # Create a method level DataFrame of the file
             full_df = None
@@ -45,7 +45,7 @@ class Converter:
                 else:
                     full_df = full_df.append(file_dfs[page_df])
 
-            full_df['File Name'] = file_name
+            full_df[Validation.Keys.FILE_NAME.value] = file_name
 
             # Check for similar DataFrame objects in the class list.
             if len(self.df_list) == 0:

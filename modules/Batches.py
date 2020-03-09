@@ -1,9 +1,12 @@
 from . import os
 from . import re
 from . import json
+from . import Enum
 from . import Validation
 from . import project_dir
-import snowflake.connector
+from . import temp_batch_dir
+from .snowflake import SnowflakeHandler
+import snowflake.connector  # todo: Replace the direct connector method with the local snowflake module.
 import openpyxl as xl
 import datetime as dt
 import pandas as pd
@@ -11,10 +14,6 @@ import pandas as pd
 
 class BatchHandler:
     """
-    This class is setup to do the following tasks:
-        1) Create an excel workbook populated by two SQL queries.
-        2) Run a headless chromedriver to upload the excel workbook to ShareFile.
-
     Prerequisites:
         1) You need to create a JSON formatted Environment Variable, named "SNOWFLAKE_KEY", with the following keys.
             1) USER
@@ -24,22 +23,53 @@ class BatchHandler:
             5) DATABASE
         Please see Snowflake documentation for the definitions of the required fields.
     """
+
+    class Keys(Enum):
+        """
+        Class level keys used in kwargs
+        """
+        PRIMARY_TABLE = 'primary_table'
+        SCHEMA = 'schema'
+        FILE_STRUCTURE = 'file_structure'
+        FILE_NAME = 'File Name'
+
+    class _DefaultParameters(Enum):
+        """
+        Class level parameters
+        """
+        SCHEMA = 'D_POST_INSTALL'
+        PRIMARY_TABLE = 'T_FILING_BATCH_UPLOAD_FILES'
+        BATCH_REGEX = re.compile(r'Batch \d{3}', re.I)
+
     all_batch_sql_file = os.path.join(project_dir,
                                       'queries',
                                       'account_list.sql')
 
-    def __init__(self, batch_end_date, save_location, console_output=False):
+    def __init__(self, batch_end_date, save_location, console_output=False, *args, **kwargs):
         self.console_output = console_output
+        self.schema = kwargs[self.Keys.SCHEMA.value] if self.Keys.SCHEMA.value in kwargs \
+            else self._DefaultParameters.SCHEMA.value
+        self.primary_table = kwargs[self.Keys.PRIMARY_TABLE.value] if self.Keys.PRIMARY_TABLE.value in kwargs \
+            else self._DefaultParameters.PRIMARY_TABLE.value
+        self.file_structure = kwargs[self.Keys.FILE_STRUCTURE.value] if self.Keys.FILE_STRUCTURE.value in kwargs \
+            else Validation.weekly_batch_structure.value
         self.workbooks = {}
         self.sheets = []
         self.snowflake_credentials = {}
+        self.args_passed = args
+        self.kwargs_passed = kwargs
+        self.snowflake = SnowflakeHandler(console_output=console_output,
+                                          schema=self.schema,
+                                          primary_table=self.primary_table)
         self.all_batch_sql = ''
         self.batch_number = 0
         self.save_location = save_location
         self.batch_end_date = batch_end_date
         self.con = None
         self.cur = None
-        self.file_structure = Validation.weekly_batch_structure.value
+        self.existing_files_query = """SELECT DISTINCT F.FILE_NAME
+FROM D_POST_INSTALL.T_FILING_BATCH_UPLOAD_FILES AS F
+"""
 
     def _set_credentials(self):
         if self.console_output:
@@ -126,12 +156,57 @@ class BatchHandler:
         if self.console_output:
             print('All files have been saved, and all connections have been closed.')
 
+    def _upload_batch_files(self):
+        """
+        This method compares the list of files in the ShareFile upload location to the list of files uploaded to the
+        data warehouse. If there are files in ShareFile that are not in the data warehouse, this method will initiate
+        the steps needed to convert the ShareFile .xlsx file to a .csv, and upload the new .csv file to the data
+        warehouse table used in the initial search.
+        :return: None
+        :rtype: None
+        """
+        self.snowflake.set_con_and_cur()
+        uploaded_files = [x[0] for x in self.snowflake.run_query_string(self.existing_files_query)]
+        sharefile_dir = Validation.dl_dir_match.value[Validation.batch_save_location_sharefile.value][
+            Validation.Keys.value.BATCH.value]
+        current_files = os.listdir(sharefile_dir)
+        for file in current_files:
+            if file[:-5] not in uploaded_files:
+                if self.console_output:
+                    print(f'{file[:-5]} needs to be uploaded')
+                if not os.path.exists(temp_batch_dir):
+                    os.mkdir(temp_batch_dir)
+                temp_files = os.listdir(temp_batch_dir)
+                if self.console_output:
+                    print(f'project temp directory:\n{temp_files}')
+                for temp in temp_files:
+                    os.remove(os.path.join(temp_batch_dir, temp))
+                if self.console_output:
+                    print(f'project temp directory:\n{temp_files}')
+                file_name = file[:-5]
+                f_path = os.path.join(sharefile_dir, file)
+                pages = pd.ExcelFile(f_path).sheet_names
+                f_df = pd.DataFrame(f_path, pages)
+                compiled_df = None
+                for page_df in f_df:
+                    if compiled_df is None:
+                        compiled_df = f_df[page_df]
+                    else:
+                        compiled_df = compiled_df.append(f_df[page_df])
+                compiled_df[self.Keys.FILE_NAME.value] = file_name
+                compiled_df.to_csv(os.path.join(temp_batch_dir, file_name + '.csv'), index=False)
+                self.snowflake.run_table_updates(temp_batch_dir,
+                                                 Validation.batch_file_pattern.value,
+                                                 Validation.update_type_append.value)
+        self.snowflake.close_con_and_cur()
+
     def run_batch_handler(self):
         self._set_credentials()
         self._collect_queries()
         self._generate_workbooks()
         self._calc_batch()
         self._populate_workbook()
+        self._upload_batch_files()
 
     def search_for_accounts(self, lst):
         """
@@ -144,14 +219,16 @@ class BatchHandler:
         batch_regex = re.compile(r'Batch \d{3}', re.I)
         acct_regex = re.compile(r'\d{6,}')
         acct_list = {}
-        for file in os.listdir(self.file_save_dir):
+        sharefile_dir = Validation.dl_dir_match.value[Validation.batch_save_location_sharefile.value][
+            Validation.Keys.value.BATCH.value]
+        for file in os.listdir(sharefile_dir):
             if self.console_output:
                 print('checking {}'.format(file))
             mo = batch_regex.search(file)
             if mo:
                 if self.console_output:
                     print('opening {}'.format(file))
-                f = xl.load_workbook(os.path.join(self.file_save_dir, file))
+                f = xl.load_workbook(os.path.join(sharefile_dir, file))
                 fs = f.active
                 if self.console_output:
                     print('iterating through the first two columns...')

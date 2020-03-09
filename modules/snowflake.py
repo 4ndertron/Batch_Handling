@@ -110,7 +110,7 @@ ON_ERROR = 'skip_file';"""
             self.sql_command(stage_file_text)
         self.sql_command('remove @my_uploader_stage')
 
-    def _populate_table(self, files_dir, file_pattern):
+    def _populate_table(self, file_pattern):
         command = self.populate_table_text.replace('<<tn>>', self.primary_table)
         command = command.replace('<<pat>>', file_pattern)
         if self.console_output:
@@ -120,10 +120,10 @@ ON_ERROR = 'skip_file';"""
     def run_table_updates(self, files_dir, file_pattern, update_type):
         if update_type == 'append':
             self._stage_file(files_dir)
-            self._populate_table(files_dir, file_pattern)
+            self._populate_table(file_pattern)
         elif update_type == 'replace':
             self._truncate_table()
             self._stage_file(files_dir)
-            self._populate_table(files_dir, file_pattern)
+            self._populate_table(file_pattern)
         else:
             return Messages.wrong_update_type.value
