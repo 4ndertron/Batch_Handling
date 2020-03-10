@@ -42,6 +42,7 @@ ON_ERROR = 'skip_file';"""
         snowflake_json = json.loads(os.environ['SNOWFLAKE_KEY'])
         for k, v in snowflake_json.items():
             self.snowflake_credentials[k.lower()] = v
+        self.snowflake_credentials['schema'] = self.schema
         if self.console_output:
             print('credentials have been collected and assigned')
 

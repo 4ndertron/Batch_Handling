@@ -5,8 +5,8 @@ from modules import Messages
 
 
 def update_invoice_details(*args):
-    primary_table = Validation.invoice_primary_table.value
-    file_pattern_text = Validation.invoice_file_pattern.value
+    primary_table = Validation._invoice_primary_table.value
+    file_pattern_text = Validation._invoice_file_pattern.value
     convert_directory = os.path.join(os.getcwd(), 'audit', 'invoices', 'details')
     converter = Converter(debug_text=args[0],
                           schema=args[1],
@@ -21,7 +21,7 @@ def update_invoice_details(*args):
 
 
 def update_old_invoice_details(*args):
-    primary_table = Validation.invoice_primary_table.value
+    primary_table = Validation._invoice_primary_table.value
     file_pattern_text = Validation.old_invoice_file_pattern.value
     convert_directory = os.path.join(os.getcwd(), 'audit', 'invoices', 'old_invoice_details')
     converter = Converter(debug_text=args[0],
@@ -37,8 +37,8 @@ def update_old_invoice_details(*args):
 
 
 def update_batch_upload_files(*args):
-    primary_table = Validation.batch_primary_table.value
-    file_pattern_text = Validation.batch_file_pattern.value
+    primary_table = Validation._batch_primary_table.value
+    file_pattern_text = Validation._batch_file_pattern.value
     convert_directory = os.path.join(os.getcwd(), 'audit', 'invoices', 'uploads')
     converter = Converter(debug_text=args[0],
                           schema=args[1],
@@ -55,8 +55,8 @@ def update_batch_upload_files(*args):
 def update_new_batch_upload_files(*args):
     passed_args = args
     print(f'Debug args in fun: {passed_args}')
-    primary_table = Validation.batch_primary_table.value
-    file_pattern_text = Validation.batch_file_pattern.value
+    primary_table = Validation._batch_primary_table.value
+    file_pattern_text = Validation._batch_file_pattern.value
     convert_directory = os.path.join(os.getcwd(), 'audit', 'invoices', 'new_uploads')
     converter = Converter(debug_text=args[0],
                           schema=args[1],

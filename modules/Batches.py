@@ -31,6 +31,7 @@ class BatchHandler:
         PRIMARY_TABLE = 'primary_table'
         SCHEMA = 'schema'
         FILE_STRUCTURE = 'file_structure'
+        MISSING_FILE_TYPE = 'missing_file_type'
         FILE_NAME = 'File Name'
 
     class _DefaultParameters(Enum):
@@ -40,6 +41,7 @@ class BatchHandler:
         SCHEMA = 'D_POST_INSTALL'
         PRIMARY_TABLE = 'T_FILING_BATCH_UPLOAD_FILES'
         BATCH_REGEX = re.compile(r'Batch \d{3}', re.I)
+        MISSING_FILE_TYPE = Validation.missing_file_type_batch.value
 
     all_batch_sql_file = os.path.join(project_dir,
                                       'queries',
@@ -53,6 +55,9 @@ class BatchHandler:
             else self._DefaultParameters.PRIMARY_TABLE.value
         self.file_structure = kwargs[self.Keys.FILE_STRUCTURE.value] if self.Keys.FILE_STRUCTURE.value in kwargs \
             else Validation.weekly_batch_structure.value
+        self.missing_file_type = kwargs[
+            self.Keys.MISSING_FILE_TYPE.value] if self.Keys.MISSING_FILE_TYPE.value in kwargs \
+            else self._DefaultParameters.MISSING_FILE_TYPE.value
         self.workbooks = {}
         self.sheets = []
         self.snowflake_credentials = {}
@@ -67,8 +72,11 @@ class BatchHandler:
         self.batch_end_date = batch_end_date
         self.con = None
         self.cur = None
-        self.existing_files_query = """SELECT DISTINCT F.FILE_NAME
+        self.existing_batch_files_query = """SELECT DISTINCT F.FILE_NAME
 FROM D_POST_INSTALL.T_FILING_BATCH_UPLOAD_FILES AS F
+"""
+        self.existing_invoice_files_query = """SELECT DISTINCT I.FILE_NAME
+FROM D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS AS I
 """
 
     def _set_credentials(self):
@@ -156,7 +164,22 @@ FROM D_POST_INSTALL.T_FILING_BATCH_UPLOAD_FILES AS F
         if self.console_output:
             print('All files have been saved, and all connections have been closed.')
 
-    def _upload_batch_files(self):
+    def _create_pd_df(self, full_file_path):
+        xl = pd.ExcelFile(full_file_path)
+        sheets = xl.sheet_names
+        file = os.path.basename(full_file_path)
+        file_name = Validation.file_name_re.value.match(file).group()
+        file_df = pd.read_excel(full_file_path, sheets)
+        compiled_df = None
+        for page_df in file_df:
+            if compiled_df is None:
+                compiled_df = file_df[page_df]
+            else:
+                compiled_df = compiled_df.append(file_df[page_df])
+        compiled_df[self.Keys.FILE_NAME.value] = file_name
+        return compiled_df
+
+    def _upload_missing_files(self):
         """
         This method compares the list of files in the ShareFile upload location to the list of files uploaded to the
         data warehouse. If there are files in ShareFile that are not in the data warehouse, this method will initiate
@@ -166,14 +189,21 @@ FROM D_POST_INSTALL.T_FILING_BATCH_UPLOAD_FILES AS F
         :rtype: None
         """
         self.snowflake.set_con_and_cur()
-        uploaded_files = [x[0] for x in self.snowflake.run_query_string(self.existing_files_query)]
-        sharefile_dir = Validation.dl_dir_match.value[Validation.batch_save_location_sharefile.value][
-            Validation.Keys.value.BATCH.value]
-        current_files = os.listdir(sharefile_dir)
+        search_dir = Validation.file_type_search_dir.value[self.missing_file_type]
+        current_files = os.listdir(search_dir)
+        if self.missing_file_type == Validation.missing_file_type_batch.value:
+            uploaded_files = [x[0] for x in self.snowflake.run_query_string(self.existing_batch_files_query)]
+        elif self.missing_file_type == Validation.missing_file_type_invoice.value:
+            uploaded_files = [x[0] for x in self.snowflake.run_query_string(self.existing_invoice_files_query)]
+        else:  # lock the logic for the rest of the method to avoid any unintentional upload attempts.
+            uploaded_files = current_files
+        self.snowflake.close_con_and_cur()
         for file in current_files:
-            if file[:-5] not in uploaded_files:
+            file_mo = Validation.file_type_re.value[self.missing_file_type].match(file)
+            file_name = Validation.file_name_re.value.match(file).group()
+            if file_name not in uploaded_files and file_mo is not None:
                 if self.console_output:
-                    print(f'{file[:-5]} needs to be uploaded')
+                    print(f'{file_name} needs to be uploaded')
                 if not os.path.exists(temp_batch_dir):
                     os.mkdir(temp_batch_dir)
                 temp_files = os.listdir(temp_batch_dir)
@@ -183,22 +213,37 @@ FROM D_POST_INSTALL.T_FILING_BATCH_UPLOAD_FILES AS F
                     os.remove(os.path.join(temp_batch_dir, temp))
                 if self.console_output:
                     print(f'project temp directory:\n{temp_files}')
-                file_name = file[:-5]
-                f_path = os.path.join(sharefile_dir, file)
-                pages = pd.ExcelFile(f_path).sheet_names
-                f_df = pd.DataFrame(f_path, pages)
-                compiled_df = None
-                for page_df in f_df:
-                    if compiled_df is None:
-                        compiled_df = f_df[page_df]
-                    else:
-                        compiled_df = compiled_df.append(f_df[page_df])
-                compiled_df[self.Keys.FILE_NAME.value] = file_name
+                f_path = os.path.join(search_dir, file)
+                compiled_df = self._create_pd_df(f_path)
                 compiled_df.to_csv(os.path.join(temp_batch_dir, file_name + '.csv'), index=False)
                 self.snowflake.run_table_updates(temp_batch_dir,
-                                                 Validation.batch_file_pattern.value,
+                                                 Validation.file_type_file_patterns.value[self.missing_file_type],
                                                  Validation.update_type_append.value)
-        self.snowflake.close_con_and_cur()
+
+    def upload_new_invoice(self, file_directory):
+        """
+        Full Method steps
+        1) search email threads for a matching invoice detail thread from LD
+        2) Download the invoice detail file
+        3) Identify if the file name exists in the warehouse
+        4) Convert the file to a csv, if it doesn't exist in the warehouse
+        5) Upload the csv file to the warehouse, if one was made.
+        6) Join the details of the new invoice with accounts sent in the batch files
+        7) Identify the match ratio, and return findings to a text file to review the findings.
+        :param file_directory:
+        :type file_directory:
+        :return:
+        :rtype:
+        """
+        self.snowflake.set_con_and_cur()
+        uploaded_files = [x[0] for x in self.snowflake.run_query_string(self.existing_invoice_files_query)]
+        search_dir = file_directory
+        current_files = os.listdir(search_dir)
+        for file in current_files:
+            file_name = Validation.file_name_re.value.match(file).group()
+            if file_name not in uploaded_files:
+                if self.console_output:
+                    print(f'{file_name} needs to be uploaded to the warehouse')
 
     def run_batch_handler(self):
         self._set_credentials()
@@ -206,7 +251,11 @@ FROM D_POST_INSTALL.T_FILING_BATCH_UPLOAD_FILES AS F
         self._generate_workbooks()
         self._calc_batch()
         self._populate_workbook()
-        self._upload_batch_files()
+        self._upload_missing_files()
+
+    def run_new_invoices(self):
+        self._set_credentials()
+        self._upload_missing_files()
 
     def search_for_accounts(self, lst):
         """
@@ -216,7 +265,7 @@ FROM D_POST_INSTALL.T_FILING_BATCH_UPLOAD_FILES AS F
         :param lst: list of 6 or more digit accounts .
         :return: dictionary of accounts found in a file.
         """
-        batch_regex = re.compile(r'Batch \d{3}', re.I)
+        batch_regex = re.compile(r'Batch \d{3,}.*', re.I)
         acct_regex = re.compile(r'\d{6,}')
         acct_list = {}
         sharefile_dir = Validation.dl_dir_match.value[Validation.batch_save_location_sharefile.value][
