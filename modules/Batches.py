@@ -33,6 +33,8 @@ class BatchHandler:
         FILE_STRUCTURE = 'file_structure'
         MISSING_FILE_TYPE = 'missing_file_type'
         FILE_NAME = 'File Name'
+        BATCH_END_DATE = 'batch_end_date'
+        SAVE_LOCATION = 'save_location'
 
     class _DefaultParameters(Enum):
         """
@@ -42,12 +44,14 @@ class BatchHandler:
         PRIMARY_TABLE = 'T_FILING_BATCH_UPLOAD_FILES'
         BATCH_REGEX = re.compile(r'Batch \d{3}', re.I)
         MISSING_FILE_TYPE = Validation.missing_file_type_batch.value
+        BATCH_END_DATE = dt.date.today()
+        SAVE_LOCATION = Validation.batch_save_location_sharefile.value
 
     all_batch_sql_file = os.path.join(project_dir,
                                       'queries',
                                       'account_list.sql')
 
-    def __init__(self, batch_end_date, save_location, console_output=False, *args, **kwargs):
+    def __init__(self, console_output=False, *args, **kwargs):
         self.console_output = console_output
         self.schema = kwargs[self.Keys.SCHEMA.value] if self.Keys.SCHEMA.value in kwargs \
             else self._DefaultParameters.SCHEMA.value
@@ -58,6 +62,10 @@ class BatchHandler:
         self.missing_file_type = kwargs[
             self.Keys.MISSING_FILE_TYPE.value] if self.Keys.MISSING_FILE_TYPE.value in kwargs \
             else self._DefaultParameters.MISSING_FILE_TYPE.value
+        self.save_location = kwargs[self.Keys.SAVE_LOCATION.value] if self.Keys.FILE_STRUCTURE.value in kwargs \
+            else self._DefaultParameters.SAVE_LOCATION.value
+        self.batch_end_date = kwargs[self.Keys.BATCH_END_DATE.value] if self.Keys.BATCH_END_DATE.value in kwargs \
+            else self._DefaultParameters.BATCH_END_DATE.value
         self.workbooks = {}
         self.sheets = []
         self.snowflake_credentials = {}
@@ -68,8 +76,6 @@ class BatchHandler:
                                           primary_table=self.primary_table)
         self.all_batch_sql = ''
         self.batch_number = 0
-        self.save_location = save_location
-        self.batch_end_date = batch_end_date
         self.con = None
         self.cur = None
         self.existing_batch_files_query = """SELECT DISTINCT F.FILE_NAME
@@ -117,11 +123,12 @@ FROM D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS AS I
             print('Making a temporary workspace in memory')
         for file in self.file_structure:
             self.workbooks[file] = {}
-            self.workbooks[file][Validation.workbook_key.value] = xl.Workbook(file + '.xlsx')
-            self.workbooks[file][Validation.worksheet_key.value] = []
+            self.workbooks[file][Validation.Keys.value.WORKBOOK.value] = xl.Workbook(file + '.xlsx')
+            self.workbooks[file][Validation.Keys.value.WORKSHEET.value] = []
             for i in range(len(self.file_structure[file])):
-                self.workbooks[file][Validation.worksheet_key.value].append(
-                    self.workbooks[file][Validation.workbook_key.value].create_sheet(self.file_structure[file][i], i))
+                self.workbooks[file][Validation.Keys.value.WORKSHEET.value].append(
+                    self.workbooks[file][Validation.Keys.value.WORKBOOK.value].create_sheet(
+                        self.file_structure[file][i], i))
 
     def _populate_workbook(self):
         if self.console_output:
@@ -139,7 +146,7 @@ FROM D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS AS I
         if self.console_output:
             print('Writing results to the temporary workspace...')
         for wb in self.workbooks:
-            for ws in self.workbooks[wb][Validation.worksheet_key.value]:
+            for ws in self.workbooks[wb][Validation.Keys.value.WORKSHEET.value]:
                 ws.append(col_names)
         # for sheet in self.sheets:
         #     sheet.append(col_names)
@@ -150,17 +157,18 @@ FROM D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS AS I
                 type_index = len(result) - 1  # Get the index integer of the batch type column
                 result_type = result[type_index]  # Get the batch type value of the specific result
                 for wb in self.workbooks:  # Iterate through the workbooks
-                    if result_type in self.workbooks[wb][Validation.workbook_key.value].sheetnames:
-                        self.workbooks[wb][Validation.worksheet_key.value][
-                            self.workbooks[wb][Validation.workbook_key.value].sheetnames.index(result_type)].append(
+                    if result_type in self.workbooks[wb][Validation.Keys.value.WORKBOOK.value].sheetnames:
+                        self.workbooks[wb][Validation.Keys.value.WORKSHEET.value][
+                            self.workbooks[wb][Validation.Keys.value.WORKBOOK.value].sheetnames.index(
+                                result_type)].append(
                             result)  # Append the record to the sheet
         if self.console_output:
             print('Saving the workspaces to your designated location...')
         for wb in self.workbooks:
             dl_dir = Validation.dl_dir_match.value[self.save_location][wb]
             file_name = wb + f' {self.batch_number} {self.batch_end_date.strftime("%m.%d.%Y")}.xlsx'
-            self.workbooks[wb][Validation.workbook_key.value].save(os.path.join(dl_dir, file_name))
-            self.workbooks[wb][Validation.workbook_key.value].close()
+            self.workbooks[wb][Validation.Keys.value.WORKBOOK.value].save(os.path.join(dl_dir, file_name))
+            self.workbooks[wb][Validation.Keys.value.WORKBOOK.value].close()
         if self.console_output:
             print('All files have been saved, and all connections have been closed.')
 
@@ -168,7 +176,7 @@ FROM D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS AS I
         xl = pd.ExcelFile(full_file_path)
         sheets = xl.sheet_names
         file = os.path.basename(full_file_path)
-        file_name = Validation.file_name_re.value.match(file).group()
+        file_name = os.path.splitext(file)[0]
         file_df = pd.read_excel(full_file_path, sheets)
         compiled_df = None
         for page_df in file_df:
@@ -200,7 +208,7 @@ FROM D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS AS I
         self.snowflake.close_con_and_cur()
         for file in current_files:
             file_mo = Validation.file_type_re.value[self.missing_file_type].match(file)
-            file_name = Validation.file_name_re.value.match(file).group()
+            file_name = os.path.splitext(file)[0]
             if file_name not in uploaded_files and file_mo is not None:
                 if self.console_output:
                     print(f'{file_name} needs to be uploaded')
@@ -240,7 +248,7 @@ FROM D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS AS I
         search_dir = file_directory
         current_files = os.listdir(search_dir)
         for file in current_files:
-            file_name = Validation.file_name_re.value.match(file).group()
+            file_name = os.path.splitext(file)[0]
             if file_name not in uploaded_files:
                 if self.console_output:
                     print(f'{file_name} needs to be uploaded to the warehouse')
@@ -253,7 +261,7 @@ FROM D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS AS I
         self._populate_workbook()
         self._upload_missing_files()
 
-    def run_new_invoices(self):
+    def run_missing_files(self):
         self._set_credentials()
         self._upload_missing_files()
 

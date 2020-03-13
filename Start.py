@@ -22,25 +22,38 @@ def main_batch_process():
     batches.run_batch_handler()
 
 
-def upload_new_invoices():
-    batch_date = dt.date.today()
-    save_location = Validation.batch_save_location_local.value
-    print(f'Batch date: {batch_date.strftime("%m.%d.%Y")}\nsave location: {save_location}\n')
-    parameters = {BatchHandler.Keys.MISSING_FILE_TYPE.value: Validation.missing_file_type_invoice.value}
-    batches = BatchHandler(batch_end_date=batch_date,
-                           save_location=save_location,
-                           console_output=True,
-                           **parameters)
-    batches.run_new_invoices()
+def upload_missing_file_types(missing_types):
+    print(missing_types)
+    if len(missing_types) > 0:
+        for missing_type in missing_types:
+            print(missing_type)
+            parameters = {
+                BatchHandler.Keys.MISSING_FILE_TYPE.value: missing_type,
+                BatchHandler.Keys.PRIMARY_TABLE.value: Validation.file_type_primary_tables.value[missing_type]
+            }
+            batches = BatchHandler(console_output=True, **parameters)
+            batches.run_missing_files()
 
 
 def main():
     main_begin = time.time()
-    main_batch_process_thread = threading.Thread(target=main_batch_process, name='Wednesday Batch Processing')
-    new_invoice_thread = threading.Thread(target=upload_new_invoices, name='New Invoice Processing')
 
-    # main_batch_process_thread.start()
-    new_invoice_thread.start()
+    main_batch_process_thread = threading.Thread(target=main_batch_process,
+                                                 name='Wednesday Batch Processing')
+
+    types = []
+    types.append(Validation.missing_file_type_batch.value)
+    types.append(Validation.missing_file_type_invoice.value)
+    types.append(Validation.missing_file_type_continuation.value)
+
+    missing_files_thread = threading.Thread(target=upload_missing_file_types,
+                                            name='Uploading Files',
+                                            args=(types,))
+
+    if dt.date.today().isoweekday() == 3:
+        main_batch_process_thread.start()
+    else:
+        missing_files_thread.start()
 
     while threading.active_count() > 1:
         print(f'{threading.active_count() - 1} extra processing running.\n')

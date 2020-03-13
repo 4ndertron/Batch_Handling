@@ -99,17 +99,17 @@ ON_ERROR = 'skip_file';"""
             print(command)
         self.sql_command(command)
 
-    def _stage_file(self, files_dir):
-        self.sql_command('remove @my_uploader_stage')
+    def _stage_file(self, files_dir, file_pattern):
+        self.sql_command(f"remove @my_uploader_stage pattern='.*{file_pattern}.*'")
         for f in os.listdir(files_dir):
             full_file = Path(os.path.join(files_dir, f))
             if self.console_output:
                 print(full_file)
-            stage_file_text = f"""put 'file://C:/{'/'.join(full_file.parts[1:])}' @my_uploader_stage auto_compress = true;"""
+            stage_file_text = f"""put 'file://C:/{'/'.join(
+                full_file.parts[1:])}' @my_uploader_stage auto_compress = true;"""
             if self.console_output:
                 print(stage_file_text)
             self.sql_command(stage_file_text)
-        self.sql_command('remove @my_uploader_stage')
 
     def _populate_table(self, file_pattern):
         command = self.populate_table_text.replace('<<tn>>', self.primary_table)
@@ -120,11 +120,11 @@ ON_ERROR = 'skip_file';"""
 
     def run_table_updates(self, files_dir, file_pattern, update_type):
         if update_type == 'append':
-            self._stage_file(files_dir)
+            self._stage_file(files_dir, file_pattern)
             self._populate_table(file_pattern)
         elif update_type == 'replace':
             self._truncate_table()
-            self._stage_file(files_dir)
+            self._stage_file(files_dir, file_pattern)
             self._populate_table(file_pattern)
         else:
             return Messages.wrong_update_type.value
