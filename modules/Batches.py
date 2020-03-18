@@ -62,7 +62,7 @@ class BatchHandler:
         self.missing_file_type = kwargs[
             self.Keys.MISSING_FILE_TYPE.value] if self.Keys.MISSING_FILE_TYPE.value in kwargs \
             else self._DefaultParameters.MISSING_FILE_TYPE.value
-        self.save_location = kwargs[self.Keys.SAVE_LOCATION.value] if self.Keys.FILE_STRUCTURE.value in kwargs \
+        self.save_location = kwargs[self.Keys.SAVE_LOCATION.value] if self.Keys.SAVE_LOCATION.value in kwargs \
             else self._DefaultParameters.SAVE_LOCATION.value
         self.batch_end_date = kwargs[self.Keys.BATCH_END_DATE.value] if self.Keys.BATCH_END_DATE.value in kwargs \
             else self._DefaultParameters.BATCH_END_DATE.value
@@ -196,37 +196,43 @@ FROM D_POST_INSTALL.T_FILINGS_INVOICE_DETAILS AS I
         :return: None
         :rtype: None
         """
-        self.snowflake.set_con_and_cur()
-        search_dir = Validation.file_type_search_dir.value[self.missing_file_type]
-        current_files = os.listdir(search_dir)
-        if self.missing_file_type == Validation.missing_file_type_batch.value:
-            uploaded_files = [x[0] for x in self.snowflake.run_query_string(self.existing_batch_files_query)]
-        elif self.missing_file_type == Validation.missing_file_type_invoice.value:
-            uploaded_files = [x[0] for x in self.snowflake.run_query_string(self.existing_invoice_files_query)]
-        else:  # lock the logic for the rest of the method to avoid any unintentional upload attempts.
-            uploaded_files = current_files
-        self.snowflake.close_con_and_cur()
-        for file in current_files:
-            file_mo = Validation.file_type_re.value[self.missing_file_type].match(file)
-            file_name = os.path.splitext(file)[0]
-            if file_name not in uploaded_files and file_mo is not None:
-                if self.console_output:
-                    print(f'{file_name} needs to be uploaded')
-                if not os.path.exists(temp_batch_dir):
-                    os.mkdir(temp_batch_dir)
-                temp_files = os.listdir(temp_batch_dir)
-                if self.console_output:
-                    print(f'project temp directory:\n{temp_files}')
-                for temp in temp_files:
-                    os.remove(os.path.join(temp_batch_dir, temp))
-                if self.console_output:
-                    print(f'project temp directory:\n{temp_files}')
-                f_path = os.path.join(search_dir, file)
-                compiled_df = self._create_pd_df(f_path)
-                compiled_df.to_csv(os.path.join(temp_batch_dir, file_name + '.csv'), index=False)
-                self.snowflake.run_table_updates(temp_batch_dir,
-                                                 Validation.file_type_file_patterns.value[self.missing_file_type],
-                                                 Validation.update_type_append.value)
+        if self.save_location != Validation.batch_save_location_local.value:
+            self.snowflake.set_con_and_cur()
+            search_dir = Validation.file_type_search_dir.value[self.missing_file_type]
+            current_files = os.listdir(search_dir)
+            if self.missing_file_type == Validation.missing_file_type_batch.value:
+                uploaded_files = [x[0] for x in self.snowflake.run_query_string(self.existing_batch_files_query)]
+            elif self.missing_file_type == Validation.missing_file_type_invoice.value:
+                uploaded_files = [x[0] for x in self.snowflake.run_query_string(self.existing_invoice_files_query)]
+            else:  # lock the logic for the rest of the method to avoid any unintentional upload attempts.
+                uploaded_files = current_files
+            self.snowflake.close_con_and_cur()
+            print(uploaded_files)
+            for file in current_files:
+                file_mo = Validation.file_type_re.value[self.missing_file_type].match(file)
+                # print(file_mo)
+                file_name = os.path.splitext(file)[0]
+                # print(file_name)
+                if file_name not in uploaded_files and file_mo is not None:
+                    print(f'{file_name} is a trouble child')
+                    print(f'{file_mo} is a trouble child')
+                    if self.console_output:
+                        print(f'{file_name} needs to be uploaded')
+                    if not os.path.exists(temp_batch_dir):
+                        os.mkdir(temp_batch_dir)
+                    temp_files = os.listdir(temp_batch_dir)
+                    if self.console_output:
+                        print(f'project temp directory:\n{temp_files}')
+                    for temp in temp_files:
+                        os.remove(os.path.join(temp_batch_dir, temp))
+                    if self.console_output:
+                        print(f'project temp directory:\n{os.listdir(temp_batch_dir)}')
+                    f_path = os.path.join(search_dir, file)
+                    compiled_df = self._create_pd_df(f_path)
+                    compiled_df.to_csv(os.path.join(temp_batch_dir, file_name + '.csv'), index=False)
+                    self.snowflake.run_table_updates(temp_batch_dir,
+                                                     Validation.file_type_file_patterns.value[self.missing_file_type],
+                                                     Validation.update_type_append.value)
 
     def upload_new_invoice(self, file_directory):
         """

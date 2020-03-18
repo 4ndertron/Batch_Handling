@@ -8,17 +8,21 @@ from modules.Batches import BatchHandler
 
 def main_batch_process():
     if dt.date.today().isoweekday() == 3:
-        batch_date = dt.date.today()
+        batch_date = dt.date.today() + dt.timedelta(days=-1 * (7 * 0))
         save_location = Validation.batch_save_location_sharefile.value
     else:
-        batch_date = dt.date.today() + dt.timedelta(days=-3)
+        batch_date = dt.date.today() + dt.timedelta(days=(-1 * (7 * 0)) - 1)
         save_location = Validation.batch_save_location_local.value
 
     print(f'Batch date: {batch_date.strftime("%m.%d.%Y")}\nsave location: {save_location}\n')
 
-    batches = BatchHandler(batch_end_date=batch_date,
-                           save_location=save_location,
-                           console_output=True)
+    parameters = {
+        BatchHandler.Keys.BATCH_END_DATE.value: batch_date,
+        BatchHandler.Keys.SAVE_LOCATION.value: save_location
+    }
+
+    batches = BatchHandler(console_output=True,
+                           **parameters)
     batches.run_batch_handler()
 
 
